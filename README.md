@@ -10,12 +10,24 @@
 
 **tfsm_fire** solves a common network automation challenge: given raw CLI output from a network device, which TextFSM template should you use to parse it?
 
-Instead of manually matching templates to commands, tfsm_fire:
-- Tests your device output against a database of templates
-- Scores each template based on parsing quality
-- Returns the best match with structured data
+Traditional approaches require you to know the platform and command beforehand:
+```python
+# The old way - you must know platform + command
+template = "cisco_ios_show_version"
+```
 
-Perfect for multi-vendor environments where you need to parse output from Cisco, Arista, Juniper, and dozens of other platforms.
+**tfsm_fire** flips this - give it raw output and it finds the right template:
+```python
+# The tfsm_fire way - auto-detect from output
+best_template, parsed_data, score, _ = engine.find_best_template(device_output)
+```
+
+This is particularly valuable for:
+- **Multi-vendor environments** where you don't always know what you're connecting to
+- **Legacy network discovery** where device types are unknown
+- **Batch processing captures** from heterogeneous networks
+
+> **Note:** To our knowledge, tfsm_fire is the first FOSS solution to provide automatic TextFSM template detection and scoring. Existing tools require explicit platform/command specification.
 
 ## Features
 
@@ -260,6 +272,83 @@ def create_database(db_path: str, templates_dir: str):
     conn.close()
 
 create_database("my_templates.db", "/path/to/ntc-templates/templates")
+```
+
+## Batch Processing
+
+tfsm_fire includes a batch processor for parsing large collections of network device captures.
+
+### Usage
+
+```bash
+python tfsm_batch_processor.py \
+    --capture-dir /path/to/captures \
+    --output-dir /path/to/parsed_results \
+    --db-path tfsm_templates.db \
+    --min-score 10 \
+    --verbose
+```
+
+### Options
+
+| Option | Description |
+|--------|-------------|
+| `-c, --capture-dir` | Path to capture directory containing `._output` files |
+| `-o, --output-dir` | Output directory for parsed JSON results |
+| `-d, --db-path` | Path to TextFSM templates database |
+| `-m, --min-score` | Minimum score threshold (default: 10) |
+| `-f, --folder` | Process only a specific folder (e.g., "version") |
+| `-v, --verbose` | Enable verbose output |
+| `--dry-run` | Preview without writing files |
+
+### Sample Output
+
+```
+======================================================================
+PROCESSING SUMMARY
+======================================================================
+
+Files processed:     1308/1308
+Successfully parsed: 828
+Below threshold:     0
+No match found:      480
+Skipped (empty):     0
+
+Total records:       828
+Score range:         61.0 - 100.0 (avg: 83.9)
+
+Processing time:     7.6s
+Rate:                171.2 files/sec
+
+Top Templates Used:
+  297x  paloalto_panos_show_system_info
+  257x  hp_procurve_show_system
+  234x  cisco_ios_show_version
+   40x  cisco_nxos_show_version
+
+Per-Folder Results:
+Folder                     Matched    Total    Records  Avg Score
+-----------------------------------------------------------------
+version                        828     1308        828       83.9
+```
+
+The batch processor automatically maps folder names to appropriate template filters and outputs structured JSON with metadata:
+
+```json
+{
+  "source_file": "version/device1._output",
+  "template": "cisco_ios_show_version",
+  "score": 91.88,
+  "record_count": 1,
+  "parsed_at": "2025-01-01T12:00:00",
+  "data": [
+    {
+      "VERSION": "15.2(4)M3",
+      "HOSTNAME": "router1",
+      "UPTIME": "2 weeks, 3 days"
+    }
+  ]
+}
 ```
 
 ## Use Cases
