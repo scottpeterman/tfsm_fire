@@ -37,6 +37,117 @@ import textfsm
 import io
 from collections import defaultdict
 
+DB_DOWNLOAD_URL = "https://github.com/scottpeterman/tfsm_fire/raw/refs/heads/main/tfire/tfsm_templates.db"
+
+
+def get_package_db_path() -> Path:
+    """Database in same directory as this module (fallback)."""
+    return Path(__file__).parent / "tfsm_templates.db"
+
+
+def find_database(db_path: Optional[str] = None) -> Optional[Path]:
+    """Find database - explicit path first, then cwd, then package location."""
+
+    def is_valid_db(path: Path) -> bool:
+        return path.exists() and path.is_file() and path.stat().st_size > 0
+
+    if db_path:
+        p = Path(db_path)
+        return p if is_valid_db(p) else None
+
+    # Check current working directory first
+    cwd_db = Path.cwd() / "tfsm_templates.db"
+    if is_valid_db(cwd_db):
+        return cwd_db
+
+    # Fall back to package location
+    package_db = get_package_db_path()
+    return package_db if is_valid_db(package_db) else None
+
+
+def offer_database_download() -> Optional[Path]:
+    """
+    Check if database exists in cwd; if not, offer to download from GitHub.
+    Returns the path to use, or None if no database available.
+    """
+    cwd_db = Path.cwd() / "tfsm_templates.db"
+    package_db = get_package_db_path()
+
+    # Already exists in cwd - use it
+    if cwd_db.exists() and cwd_db.stat().st_size > 0:
+        print(f"[tfsm_fire] Using database: {cwd_db}")
+        return cwd_db
+
+    # Check package location as fallback
+    if package_db.exists() and package_db.stat().st_size > 0:
+        print(f"[tfsm_fire] Using package database: {package_db}")
+        return package_db
+
+    # No database found - offer to download
+    print(f"[tfsm_fire] No database found, offering download...")
+
+    if not REQUESTS_AVAILABLE:
+        QMessageBox.warning(
+            None,
+            "No Database Found",
+            "No template database found and 'requests' library not available.\n\n"
+            "Install requests to enable download:\n"
+            "  pip install requests\n\n"
+            "Or use 'Download from NTC' in Template Manager to create one."
+        )
+        return None
+
+    reply = QMessageBox.question(
+        None,
+        "Template Database",
+        f"No template database found.\n\n"
+        f"Would you like to download the default template database?\n"
+        f"(~500+ templates from ntc-templates)\n\n"
+        f"It will be saved to:\n{cwd_db}",
+        QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+    )
+
+    if reply == QMessageBox.StandardButton.Yes:
+        try:
+            QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
+
+            response = requests.get(DB_DOWNLOAD_URL, timeout=60)
+            response.raise_for_status()
+
+            with open(cwd_db, 'wb') as f:
+                f.write(response.content)
+
+            QApplication.restoreOverrideCursor()
+
+            print(f"[tfsm_fire] Downloaded database to: {cwd_db}")
+            QMessageBox.information(
+                None,
+                "Download Complete",
+                f"Template database downloaded to:\n{cwd_db}\n\n"
+                f"Size: {cwd_db.stat().st_size / 1024:.1f} KB"
+            )
+            return cwd_db
+
+        except Exception as e:
+            QApplication.restoreOverrideCursor()
+            QMessageBox.warning(
+                None,
+                "Download Failed",
+                f"Failed to download database:\n{e}\n\n"
+                "You can manually download from:\n"
+                f"{DB_DOWNLOAD_URL}\n\n"
+                "Or use 'Download from NTC' in Template Manager."
+            )
+            return None
+    else:
+        QMessageBox.information(
+            None,
+            "No Database",
+            "You can create a database later using:\n"
+            "• 'New DB' button in the toolbar\n"
+            "• 'Download from NTC' in Template Manager"
+        )
+        return None
 
 def get_package_db_path() -> Path:
     """Database is in same directory as this module."""
@@ -1050,6 +1161,8 @@ class TextFSMTester(QMainWindow):
 
         self.init_ui()
         self.apply_theme(self.current_theme)
+        db = offer_database_download()
+        self.db_path = str(db) if db else str(Path.cwd() / "tfsm_templates.db")
 
 
     def init_ui(self):
